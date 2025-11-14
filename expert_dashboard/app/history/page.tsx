@@ -1,18 +1,18 @@
 "use client";
 
-import AppShell from "../../components/AppShell";
-import AuthGuard from "../../components/AuthGuard";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Table, Thead, Tbody, Tr, Th, Td } from "../../components/ui/table";
-import Badge from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
+import AppShell from "@/components/AppShell";
+import AuthGuard from "@/components/AuthGuard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, Thead, Tbody, Tr, Th, Td } from "@/components/ui/table";
+import Badge from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useMemo, useState, useCallback } from "react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import toast from "react-hot-toast";
-import { supabase } from "../../components/supabase";
+import { supabase } from "@/components/supabase";
 import { Loader2, AlertCircle, Edit, Trash2, X } from "lucide-react";
-import { useUser } from "../../components/UserContext";
-import { useData } from "../../components/DataContext";
+import { useUser } from "@/components/UserContext";
+import { useData } from "@/components/DataContext";
 
 const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 	year: "numeric",

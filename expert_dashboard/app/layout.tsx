@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { UserProvider } from "../components/UserContext";
-import { DataProvider } from "../components/DataContext";
-import { NotificationProvider } from "../components/NotificationContext";
+import { UserProvider } from "@/components/UserContext";
+import { DataProvider } from "@/components/DataContext";
+import { NotificationProvider } from "@/components/NotificationContext";
 import { Toaster } from "react-hot-toast";
-import { ErrorBoundary } from "../components/ErrorBoundary";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const inter = Inter({
   variable: "--font-inter",

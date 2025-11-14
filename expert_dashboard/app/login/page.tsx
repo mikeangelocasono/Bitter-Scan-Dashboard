@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "../../components/supabase";
+import { supabase } from "@/components/supabase";
 import toast from "react-hot-toast";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { mapSupabaseAuthError, validateEmail } from "../../utils/authErrors";
-import { useUser } from "../../components/UserContext";
+import { mapSupabaseAuthError, validateEmail } from "@/utils/authErrors";
+import { useUser } from "@/components/UserContext";
 
 export default function LoginPage() {
   const router = useRouter();

@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { supabase } from "../../components/supabase";
+import { supabase } from "@/components/supabase";
 import toast from "react-hot-toast";
 import { User, Mail, Lock, UserCheck, Eye, EyeOff } from "lucide-react";
-import { mapSupabaseAuthError, mapSupabaseDbError, validateEmail, validateUsername, validatePasswordStrength } from "../../utils/authErrors";
+import { mapSupabaseAuthError, mapSupabaseDbError, validateEmail, validateUsername, validatePasswordStrength } from "@/utils/authErrors";
 
 export default function RegisterPage() {
   const router = useRouter();

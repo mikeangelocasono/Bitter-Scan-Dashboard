@@ -132,7 +132,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				setValidationHistory(validations);
 				setTotalUsers(profilesResponse.count || 0);
 				initialFetched.current = true;
-			} catch (err) {
+			} catch (err: any) {
+				// Handle refresh token errors
+				const errorMessage = err?.message || "";
+				if (errorMessage.includes('Refresh Token') || errorMessage.includes('refresh_token_not_found') || err?.status === 401) {
+					console.warn('Invalid refresh token detected in data fetch, user will be signed out...');
+					// The UserContext will handle the sign-out via auth state change
+					setError("Session expired. Please log in again.");
+					return;
+				}
+				
 				const message = err instanceof Error ? err.message : "Unknown error";
 				console.error("Error fetching dashboard data:", err);
 				setError(`Failed to load data: ${message}`);

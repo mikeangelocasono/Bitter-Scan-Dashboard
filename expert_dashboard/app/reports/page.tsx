@@ -2,10 +2,10 @@
 
 import { motion } from "framer-motion";
 import { useMemo, useState, useEffect } from "react";
-import AppShell from "../../components/AppShell";
-import AuthGuard from "../../components/AuthGuard";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
+import AppShell from "@/components/AppShell";
+import AuthGuard from "@/components/AuthGuard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle, TrendingUp, Activity, PieChart, Camera, CheckCircle2 } from "lucide-react";
 import {
   LineChart,
@@ -22,10 +22,10 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import ChartCard from "../../components/charts/ChartCard";
-import { useData } from "../../components/DataContext";
+import ChartCard from "@/components/charts/ChartCard";
+import { useData } from "@/components/DataContext";
 
-import type { Scan, ValidationHistory } from "../../types";
+import type { Scan, ValidationHistory } from "@/types";
 
 type Range = "daily" | "weekly" | "monthly";
 
@@ -736,7 +736,7 @@ export default function ReportsPage() {
                         cy="50%"
                         labelLine={false}
                         label={({ name, percent }) => {
-                          const percentage = Math.round(percent * 100);
+                          const percentage = Math.round((percent ?? 0) * 100);
                           return percentage > 0 ? `${percentage}%` : "";
                         }}
                         outerRadius={110}
@@ -814,7 +814,7 @@ export default function ReportsPage() {
                         cy="50%"
                         labelLine={false}
                         label={({ name, percent }) => {
-                          const percentage = Math.round(percent * 100);
+                          const percentage = Math.round((percent ?? 0) * 100);
                           return percentage > 0 ? `${percentage}%` : "";
                         }}
                         outerRadius={110}

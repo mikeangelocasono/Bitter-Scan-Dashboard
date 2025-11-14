@@ -1,15 +1,15 @@
 "use client";
 
-import AppShell from "../../components/AppShell";
-import AuthGuard from "../../components/AuthGuard";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
+import AppShell from "@/components/AppShell";
+import AuthGuard from "@/components/AuthGuard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { useUser } from "../../components/UserContext";
+import { useUser } from "@/components/UserContext";
 import { User, Mail, UserCheck, Shield } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import toast from "react-hot-toast";
-import { supabase } from "../../components/supabase";
+import { supabase } from "@/components/supabase";
 
 const PROFILE_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   year: "numeric",

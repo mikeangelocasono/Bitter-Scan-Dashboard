@@ -1,17 +1,17 @@
 "use client";
 
-import AppShell from "../../components/AppShell";
-import AuthGuard from "../../components/AuthGuard";
+import AppShell from "@/components/AppShell";
+import AuthGuard from "@/components/AuthGuard";
 import { useMemo, useState, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import toast from "react-hot-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog";
-import { supabase } from "../../components/supabase";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { supabase } from "@/components/supabase";
 import { Loader2, AlertCircle, X } from "lucide-react";
-import { Scan } from "../../types";
-import { useUser } from "../../components/UserContext";
-import { useData } from "../../components/DataContext";
+import { Scan } from "@/types";
+import { useUser } from "@/components/UserContext";
+import { useData } from "@/components/DataContext";
 
 const VALIDATION_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 	year: "numeric",

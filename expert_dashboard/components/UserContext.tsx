@@ -87,10 +87,46 @@ export function UserProvider({ children }: { children: ReactNode }) {
       try {
         const {
           data: { session },
+          error: sessionError,
         } = await supabase.auth.getSession();
+        
+        // Handle refresh token errors
+        if (sessionError) {
+          const errorMessage = sessionError.message || '';
+          if (errorMessage.includes('Refresh Token') || errorMessage.includes('refresh_token_not_found') || sessionError.status === 401) {
+            // Invalid refresh token - clear session and sign out
+            console.warn('Invalid refresh token detected, signing out...');
+            setUser(null);
+            setProfile(null);
+            try {
+              await supabase.auth.signOut();
+            } catch {
+              // Ignore sign-out errors
+            }
+            if (isMountedRef.current) {
+              setLoading(false);
+              initialResolved.current = true;
+            }
+            return;
+          }
+          throw sessionError;
+        }
+        
         await resolveSession(session?.user ?? null);
-      } catch (error) {
-        console.error('Error getting initial session:', error);
+      } catch (error: any) {
+        // Handle AuthApiError for refresh token issues
+        if (error?.message?.includes('Refresh Token') || error?.message?.includes('refresh_token_not_found') || error?.status === 401) {
+          console.warn('Invalid refresh token detected, signing out...');
+          setUser(null);
+          setProfile(null);
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            // Ignore sign-out errors
+          }
+        } else {
+          console.error('Error getting initial session:', error);
+        }
       } finally {
         if (isMountedRef.current) {
           setLoading(false);
@@ -103,7 +139,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMountedRef.current) return;
 
       const shouldShowSpinner = !initialResolved.current;
@@ -112,9 +148,41 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
 
       try {
+        // Handle TOKEN_REFRESHED event errors
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          // Token refresh failed - sign out
+          console.warn('Token refresh failed, signing out...');
+          setUser(null);
+          setProfile(null);
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            // Ignore sign-out errors
+          }
+          if (isMountedRef.current) {
+            if (shouldShowSpinner) {
+              setLoading(false);
+            }
+            initialResolved.current = true;
+          }
+          return;
+        }
+
         await resolveSession(session?.user ?? null);
-      } catch (error) {
-        console.error('Error in auth state change:', error);
+      } catch (error: any) {
+        // Handle refresh token errors
+        if (error?.message?.includes('Refresh Token') || error?.message?.includes('refresh_token_not_found') || error?.status === 401) {
+          console.warn('Invalid refresh token detected, signing out...');
+          setUser(null);
+          setProfile(null);
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            // Ignore sign-out errors
+          }
+        } else {
+          console.error('Error in auth state change:', error);
+        }
       } finally {
         if (isMountedRef.current) {
           if (shouldShowSpinner) {
@@ -139,10 +207,41 @@ export function UserProvider({ children }: { children: ReactNode }) {
       try {
         const {
           data: { session },
+          error: sessionError,
         } = await supabase.auth.getSession();
+        
+        // Handle refresh token errors
+        if (sessionError) {
+          const errorMessage = sessionError.message || '';
+          if (errorMessage.includes('Refresh Token') || errorMessage.includes('refresh_token_not_found') || sessionError.status === 401) {
+            console.warn('Invalid refresh token detected, signing out...');
+            setUser(null);
+            setProfile(null);
+            try {
+              await supabase.auth.signOut();
+            } catch {
+              // Ignore sign-out errors
+            }
+            return;
+          }
+          throw sessionError;
+        }
+        
         await resolveSession(session?.user ?? null);
-      } catch (error) {
-        console.error('Error refreshing session on visibility change:', error);
+      } catch (error: any) {
+        // Handle AuthApiError for refresh token issues
+        if (error?.message?.includes('Refresh Token') || error?.message?.includes('refresh_token_not_found') || error?.status === 401) {
+          console.warn('Invalid refresh token detected, signing out...');
+          setUser(null);
+          setProfile(null);
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            // Ignore sign-out errors
+          }
+        } else {
+          console.error('Error refreshing session on visibility change:', error);
+        }
       }
     };
 

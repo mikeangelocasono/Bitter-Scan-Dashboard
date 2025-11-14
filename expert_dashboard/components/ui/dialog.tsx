@@ -29,16 +29,16 @@ export function Dialog({ open, onOpenChange, children }: { open: boolean; onOpen
 	);
 }
 
-export function DialogHeader({ children }: { children?: ReactNode }) {
-	return <div className="px-5 pt-5 pb-2 border-b border-[var(--color-border)]">{children}</div>;
+export function DialogHeader({ children, className }: { children?: ReactNode; className?: string }) {
+	return <div className={clsx("px-5 pt-5 pb-2 border-b border-[var(--color-border)]", className)}>{children}</div>;
 }
 
-export function DialogTitle({ children }: { children?: ReactNode }) {
-	return <h3 className="text-base font-semibold text-[var(--foreground)]">{children}</h3>;
+export function DialogTitle({ children, className }: { children?: ReactNode; className?: string }) {
+	return <h3 className={clsx("text-base font-semibold text-[var(--foreground)]", className)}>{children}</h3>;
 }
 
-export function DialogContent({ children }: { children?: ReactNode }) {
-	return <div className="px-5 py-4">{children}</div>;
+export function DialogContent({ children, className }: { children?: ReactNode; className?: string }) {
+	return <div className={clsx("px-5 py-4", className)}>{children}</div>;
 }
 
 export function DialogFooter({ children }: { children?: ReactNode }) {
