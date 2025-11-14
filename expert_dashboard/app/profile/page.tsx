@@ -84,7 +84,7 @@ export default function ProfilePage() {
       toast.success('Profile updated successfully');
       setIsEditing(false);
       await refreshProfile();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error updating profile:', error);
       toast.error('Failed to update profile. Please try again.');
     } finally {

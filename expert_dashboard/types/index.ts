@@ -90,3 +90,25 @@ export interface Notification {
   // Joined scan data
   scan?: Scan;
 }
+
+/**
+ * Type for Supabase API errors (AuthApiError, PostgrestError, etc.)
+ */
+export interface SupabaseApiError {
+  message?: string;
+  status?: number;
+  code?: string;
+  details?: string;
+  hint?: string;
+}
+
+/**
+ * Type guard to check if an error is a Supabase API error
+ */
+export function isSupabaseApiError(error: unknown): error is SupabaseApiError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    ('message' in error || 'status' in error || 'code' in error)
+  );
+}

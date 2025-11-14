@@ -4,7 +4,7 @@ import "./globals.css";
 import { UserProvider } from "@/components/UserContext";
 import { DataProvider } from "@/components/DataContext";
 import { NotificationProvider } from "@/components/NotificationContext";
-import { Toaster } from "react-hot-toast";
+import { Toaster } from "@/components/Toaster";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const inter = Inter({
@@ -34,16 +34,7 @@ export default function RootLayout({
             <DataProvider>
               <NotificationProvider>
                 {children}
-                <Toaster 
-                  position="top-right"
-                  toastOptions={{
-                    duration: 4000,
-                    style: {
-                      background: '#363636',
-                      color: '#fff',
-                    },
-                  }}
-                />
+                <Toaster />
               </NotificationProvider>
             </DataProvider>
           </UserProvider>

@@ -2,7 +2,7 @@
 
 import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabase";
-import { Scan, ValidationHistory } from "../types";
+import { Scan, ValidationHistory, SupabaseApiError, isSupabaseApiError } from "../types";
 import { useUser } from "./UserContext";
 
 type DataContextValue = {
@@ -132,14 +132,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				setValidationHistory(validations);
 				setTotalUsers(profilesResponse.count || 0);
 				initialFetched.current = true;
-			} catch (err: any) {
+			} catch (err: unknown) {
 				// Handle refresh token errors
-				const errorMessage = err?.message || "";
-				if (errorMessage.includes('Refresh Token') || errorMessage.includes('refresh_token_not_found') || err?.status === 401) {
-					console.warn('Invalid refresh token detected in data fetch, user will be signed out...');
-					// The UserContext will handle the sign-out via auth state change
-					setError("Session expired. Please log in again.");
-					return;
+				if (isSupabaseApiError(err)) {
+					const errorMessage = err.message || "";
+					if (errorMessage.includes('Refresh Token') || errorMessage.includes('refresh_token_not_found') || err.status === 401) {
+						console.warn('Invalid refresh token detected in data fetch, user will be signed out...');
+						// The UserContext will handle the sign-out via auth state change
+						setError("Session expired. Please log in again.");
+						return;
+					}
 				}
 				
 				const message = err instanceof Error ? err.message : "Unknown error";
@@ -176,7 +178,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				return null;
 			}
 			return data;
-		} catch (err) {
+		} catch (err: unknown) {
 			console.error("Error fetching scan:", err);
 			return null;
 		}
@@ -214,7 +216,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				return null;
 			}
 			return data;
-		} catch (err) {
+		} catch (err: unknown) {
 			console.error("Error fetching validation:", err);
 			return null;
 		}
@@ -440,7 +442,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 					}
 				}
 			});
-		} catch (error) {
+		} catch (error: unknown) {
 			console.error("Error setting up real-time subscription:", error);
 			// Fallback to periodic refresh
 			if (initialFetched.current) {

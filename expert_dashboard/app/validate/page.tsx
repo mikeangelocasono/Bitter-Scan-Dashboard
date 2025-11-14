@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/components/supabase";
 import { Loader2, AlertCircle, X } from "lucide-react";
-import { Scan } from "@/types";
+import { Scan, SupabaseApiError, isSupabaseApiError } from "@/types";
 import { useUser } from "@/components/UserContext";
 import { useData } from "@/components/DataContext";
 
@@ -22,14 +22,7 @@ const VALIDATION_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 	timeZone: "UTC",
 });
 
-type SupabaseError = {
-	message?: string;
-	details?: string;
-	hint?: string;
-	code?: string;
-} | null;
-
-const buildSupabaseErrorMessage = (error: SupabaseError): string => {
+const buildSupabaseErrorMessage = (error: SupabaseApiError | null): string => {
 	if (!error) return "Unknown error";
 	const parts = [error.message, error.details, error.hint].filter(Boolean);
 	return parts.length ? parts.join(" • ") : JSON.stringify(error);
@@ -156,7 +149,7 @@ export default function ValidatePage() {
 			}
 
 			await refreshData();
-		} catch (err) {
+		} catch (err: unknown) {
 			if (scanUpdated) {
 				const rollbackPayload: Record<string, unknown> = {
 					status: originalStatus,
@@ -165,14 +158,14 @@ export default function ValidatePage() {
 
 				try {
 					await applyScanUpdate(rollbackPayload);
-				} catch (rollbackError) {
+				} catch (rollbackError: unknown) {
 					console.error("Failed to rollback scan update:", rollbackError);
 				}
 			}
 
 			console.error(
 				action === "confirm" ? "Error confirming validation:" : "Error correcting validation:",
-				buildSupabaseErrorMessage(err as SupabaseError)
+				buildSupabaseErrorMessage(isSupabaseApiError(err) ? err : null)
 			);
 			toast.error(action === "confirm" ? "Failed to confirm validation" : "Failed to correct validation");
 		} finally {

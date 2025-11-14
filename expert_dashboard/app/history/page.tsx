@@ -117,7 +117,7 @@ export default function HistoryPage() {
 			setEditIdx(null);
 			setEditForm({ expert_validation: "", status: "" });
 			await refreshData();
-		} catch (err) {
+		} catch (err: unknown) {
 			console.error('Error updating validation:', err);
 			toast.error('Failed to update validation record');
 		} finally {
@@ -162,7 +162,7 @@ export default function HistoryPage() {
 			toast.success("Validation record deleted successfully");
 			setDeleteIdx(null);
 			await refreshData();
-		} catch (err) {
+		} catch (err: unknown) {
 			console.error('Error deleting validation:', err);
 			toast.error('Failed to delete validation record');
 		} finally {
@@ -343,7 +343,7 @@ export default function HistoryPage() {
 											document.body.removeChild(a);
 											URL.revokeObjectURL(url);
 											toast.success(`CSV exported (${filtered.length} records)`);
-										} catch (error) {
+										} catch (error: unknown) {
 											console.error('Error exporting CSV:', error);
 											toast.error('Failed to export CSV');
 										}
