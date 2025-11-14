@@ -1,12 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import AppShell from "@/components/AppShell";
 import AuthGuard from "@/components/AuthGuard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, TrendingUp, Activity, PieChart, Camera, CheckCircle2 } from "lucide-react";
+import { Loader2, AlertCircle, TrendingUp, Activity, PieChart, Camera, CheckCircle2, Download, Calendar } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -27,7 +27,7 @@ import { useData } from "@/components/DataContext";
 
 import type { Scan, ValidationHistory } from "@/types";
 
-type Range = "daily" | "weekly" | "monthly";
+type Range = "daily" | "weekly" | "monthly" | "custom";
 
 type TrendDatum = {
   period: string;
@@ -40,16 +40,37 @@ type ValidationDatum = {
   corrected: number;
 };
 
+// Disease color mapping (Healthy must be GREEN)
+const DISEASE_COLORS: Record<string, string> = {
+  "Cercospora": "#388E3C", // Green
+  "Yellow Mosaic Virus": "#F59E0B", // Amber
+  "Healthy": "#22C55E", // Bright Green
+  "Unknown": "#6B7280", // Gray
+  "Downy Mildew": "#3B82F6", // Blue
+  "Fusarium Wilt": "#EF4444", // Red
+};
+
+// Ripeness color mapping
+const RIPENESS_COLORS: Record<string, string> = {
+  "Immature": "#3B82F6", // Blue
+  "Mature": "#22C55E", // Green
+  "Overmature": "#F59E0B", // Amber
+  "Overripe": "#EF4444", // Red
+  "Unknown": "#6B7280", // Gray
+};
+
 const COLORS = ["#388E3C", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#10B981"];
 const RANGE_OPTIONS: { value: Range; label: string }[] = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
+  { value: "custom", label: "Custom" },
 ];
 const RANGE_LABELS: Record<Range, string> = {
   daily: "Today",
   weekly: "This Week",
   monthly: "This Month",
+  custom: "Custom Range",
 };
 
 const ONE_DAY = 24 * 60 * 60 * 1000;
@@ -65,7 +86,10 @@ function normalizeToStartOfDay(date: Date) {
   return result;
 }
 
-function getRangeStart(range: Range) {
+function getRangeStart(range: Range, customStart?: Date) {
+  if (range === "custom" && customStart) {
+    return normalizeToStartOfDay(customStart);
+  }
   const now = normalizeToStartOfDay(new Date());
   if (range === "daily") {
     return now;
@@ -79,6 +103,19 @@ function getRangeStart(range: Range) {
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   start.setHours(0, 0, 0, 0);
   return start;
+}
+
+function getRangeEnd(range: Range, customEnd?: Date) {
+  if (range === "custom" && customEnd) {
+    const end = new Date(customEnd);
+    end.setHours(23, 59, 59, 999);
+    return end;
+  }
+  const end = new Date();
+  if (range === "daily") {
+    end.setHours(23, 59, 59, 999);
+  }
+  return end;
 }
 
 function buildScansTrend(range: Range, scans: Scan[], rangeStart: Date, rangeEnd: Date): TrendDatum[] {
@@ -271,33 +308,21 @@ function buildValidationActivity(
 export default function ReportsPage() {
   const { scans, validationHistory, loading, error, refreshData } = useData();
   const [range, setRange] = useState<Range>("daily");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
 
-  // Debug: Log data availability (only in development)
-  useEffect(() => {
-    if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-      console.debug("Reports Page Data:", {
-        scansCount: scans?.length || 0,
-        validationsCount: validationHistory?.length || 0,
-        loading,
-        error,
-        range,
-      });
-    }
-  }, [scans, validationHistory, loading, error, range]);
+  // Removed debug useEffect - unnecessary re-renders
 
-  const rangeStart = useMemo(() => getRangeStart(range), [range]);
-  // Update rangeEnd when data changes to ensure real-time updates, but normalize to end of day
+  const rangeStart = useMemo(() => {
+    const customStart = customStartDate ? new Date(customStartDate) : undefined;
+    return getRangeStart(range, customStart);
+  }, [range, customStartDate]);
+  
   const rangeEnd = useMemo(() => {
-    const end = new Date();
-    // For daily range, set to end of current day
-    if (range === "daily") {
-      end.setHours(23, 59, 59, 999);
-    } else {
-      // For weekly/monthly, set to current moment
-      end.setHours(end.getHours(), end.getMinutes(), end.getSeconds(), end.getMilliseconds());
-    }
-    return end;
-  }, [range, scans, validationHistory]);
+    const customEnd = customEndDate ? new Date(customEndDate) : undefined;
+    return getRangeEnd(range, customEnd);
+  }, [range, customEndDate]);
 
   const filteredScans = useMemo(() => {
     if (!scans || scans.length === 0) return [];
@@ -373,6 +398,7 @@ export default function ReportsPage() {
             const prediction = String(scan.ai_prediction).toLowerCase();
             if (prediction.includes("cercospora")) acc.Cercospora += 1;
             else if (prediction.includes("downy") || prediction.includes("mildew")) acc["Downy Mildew"] += 1;
+            else if (prediction.includes("fusarium") || prediction.includes("wilt")) acc["Fusarium Wilt"] += 1;
             else if (prediction.includes("mosaic") || prediction.includes("virus")) acc["Yellow Mosaic Virus"] += 1;
             else if (prediction.includes("healthy")) acc.Healthy += 1;
             else acc.Unknown += 1;
@@ -381,12 +407,15 @@ export default function ReportsPage() {
           }
           return acc;
         },
-        { Cercospora: 0, "Downy Mildew": 0, "Yellow Mosaic Virus": 0, Healthy: 0, Unknown: 0 }
+        { Cercospora: 0, "Downy Mildew": 0, "Fusarium Wilt": 0, "Yellow Mosaic Virus": 0, Healthy: 0, Unknown: 0 }
       );
 
-    return Object.entries(counts)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
+    // Return in specific order with all items (even if 0) for consistent legend
+    const order = ["Cercospora", "Yellow Mosaic Virus", "Healthy", "Unknown", "Downy Mildew", "Fusarium Wilt"];
+    return order.map((name) => ({
+      name,
+      value: counts[name as keyof typeof counts] || 0,
+    })).filter((item) => item.value > 0 || item.name === "Healthy"); // Show all or only non-zero
   }, [filteredScans]);
 
   const ripenessDistribution = useMemo(() => {
@@ -411,10 +440,187 @@ export default function ReportsPage() {
         { Immature: 0, Mature: 0, Overmature: 0, Overripe: 0, Unknown: 0 }
       );
 
-    return Object.entries(counts)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
+    // Return in specific order for consistent legend
+    const order = ["Immature", "Mature", "Overmature", "Overripe", "Unknown"];
+    return order.map((name) => ({
+      name,
+      value: counts[name as keyof typeof counts] || 0,
+    })).filter((item) => item.value > 0); // Only show non-zero
   }, [filteredScans]);
+
+  // CSV Export function
+  const generateCSV = useCallback(() => {
+    const headers = [
+      "Date Range",
+      "Total Scans",
+      "Validated Scans",
+      "AI Accuracy Rate (%)",
+      "Cercospora",
+      "Yellow Mosaic Virus",
+      "Healthy",
+      "Unknown",
+      "Downy Mildew",
+      "Fusarium Wilt",
+      "Immature",
+      "Mature",
+      "Overmature",
+      "Overripe",
+    ];
+
+    const diseaseCounts = diseaseDistribution.reduce((acc, item) => {
+      acc[item.name] = item.value;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const ripenessCounts = ripenessDistribution.reduce((acc, item) => {
+      acc[item.name] = item.value;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const row = [
+      RANGE_LABELS[range],
+      filteredScans.length,
+      validatedScansCount,
+      aiAccuracyRate.toFixed(1),
+      diseaseCounts["Cercospora"] || 0,
+      diseaseCounts["Yellow Mosaic Virus"] || 0,
+      diseaseCounts["Healthy"] || 0,
+      diseaseCounts["Unknown"] || 0,
+      diseaseCounts["Downy Mildew"] || 0,
+      diseaseCounts["Fusarium Wilt"] || 0,
+      ripenessCounts["Immature"] || 0,
+      ripenessCounts["Mature"] || 0,
+      ripenessCounts["Overmature"] || 0,
+      ripenessCounts["Overripe"] || 0,
+    ];
+
+    const csvContent = [
+      headers.join(","),
+      row.map((cell) => `"${cell}"`).join(","),
+    ].join("\n");
+
+    return csvContent;
+  }, [range, filteredScans, validatedScansCount, aiAccuracyRate, diseaseDistribution, ripenessDistribution]);
+
+  const downloadCSV = useCallback((csvContent: string) => {
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `bitter-scan-report-${new Date().toISOString().split("T")[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  // PDF Export function
+  const generatePDF = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    // Create a printable HTML content
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Please allow pop-ups to generate PDF");
+      return;
+    }
+
+    const diseaseCounts = diseaseDistribution.reduce((acc, item) => {
+      acc[item.name] = item.value;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const ripenessCounts = ripenessDistribution.reduce((acc, item) => {
+      acc[item.name] = item.value;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>BitterScan Report - ${RANGE_LABELS[range]}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+            h1 { color: #388E3C; border-bottom: 2px solid #388E3C; padding-bottom: 10px; }
+            h2 { color: #2F7A33; margin-top: 30px; }
+            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+            th { background-color: #388E3C; color: white; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .metric { display: inline-block; margin: 10px 20px 10px 0; }
+            .metric-label { font-weight: bold; color: #666; }
+            .metric-value { font-size: 24px; color: #388E3C; }
+            @media print { body { margin: 0; } }
+          </style>
+        </head>
+        <body>
+          <h1>BitterScan Analytics Report</h1>
+          <p><strong>Date Range:</strong> ${RANGE_LABELS[range]}</p>
+          <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+          
+          <h2>Summary Metrics</h2>
+          <div class="metric">
+            <div class="metric-label">Total Scans</div>
+            <div class="metric-value">${filteredScans.length.toLocaleString()}</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Validated Scans</div>
+            <div class="metric-value">${validatedScansCount.toLocaleString()}</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">AI Accuracy Rate</div>
+            <div class="metric-value">${aiAccuracyRate.toFixed(1)}%</div>
+          </div>
+
+          <h2>Disease Distribution</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Disease Type</th>
+                <th>Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Cercospora</td><td>${diseaseCounts["Cercospora"] || 0}</td></tr>
+              <tr><td>Yellow Mosaic Virus</td><td>${diseaseCounts["Yellow Mosaic Virus"] || 0}</td></tr>
+              <tr><td>Healthy</td><td>${diseaseCounts["Healthy"] || 0}</td></tr>
+              <tr><td>Unknown</td><td>${diseaseCounts["Unknown"] || 0}</td></tr>
+              <tr><td>Downy Mildew</td><td>${diseaseCounts["Downy Mildew"] || 0}</td></tr>
+              <tr><td>Fusarium Wilt</td><td>${diseaseCounts["Fusarium Wilt"] || 0}</td></tr>
+            </tbody>
+          </table>
+
+          <h2>Ripeness Distribution</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Ripeness Level</th>
+                <th>Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Immature</td><td>${ripenessCounts["Immature"] || 0}</td></tr>
+              <tr><td>Mature</td><td>${ripenessCounts["Mature"] || 0}</td></tr>
+              <tr><td>Overmature</td><td>${ripenessCounts["Overmature"] || 0}</td></tr>
+              <tr><td>Overripe</td><td>${ripenessCounts["Overripe"] || 0}</td></tr>
+              <tr><td>Unknown</td><td>${ripenessCounts["Unknown"] || 0}</td></tr>
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  }, [range, filteredScans, validatedScansCount, aiAccuracyRate, diseaseDistribution, ripenessDistribution]);
 
   if (loading) {
     return (
@@ -458,18 +664,83 @@ export default function ReportsPage() {
               <h2 className="text-2xl font-semibold text-gray-900">Reports &amp; Analytics</h2>
               <p className="text-gray-600 mt-1 text-sm">Comprehensive insights into scan activity and AI performance</p>
             </div>
-            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-              {RANGE_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  variant={range === option.value ? "default" : "ghost"}
-                  size="sm"
-                  className={`text-sm font-medium ${range === option.value ? "bg-[#388E3C] text-white hover:bg-[#2F7A33]" : "text-gray-700 hover:bg-gray-100"}`}
-                  onClick={() => setRange(option.value)}
-                >
-                  {option.label}
-                </Button>
-              ))}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                {RANGE_OPTIONS.filter(opt => opt.value !== "custom").map((option) => (
+                  <Button
+                    key={option.value}
+                    variant={range === option.value ? "default" : "ghost"}
+                    size="sm"
+                    className={`text-sm font-medium ${range === option.value ? "bg-[#388E3C] text-white hover:bg-[#2F7A33]" : "text-gray-700 hover:bg-gray-100"}`}
+                    onClick={() => {
+                      setRange(option.value);
+                      setShowCustomPicker(false);
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                variant={range === "custom" ? "default" : "outline"}
+                size="sm"
+                className={`text-sm font-medium ${range === "custom" ? "bg-[#388E3C] text-white hover:bg-[#2F7A33]" : ""}`}
+                onClick={() => {
+                  setRange("custom");
+                  setShowCustomPicker(true);
+                  if (!customStartDate) {
+                    const today = new Date();
+                    const weekAgo = new Date(today);
+                    weekAgo.setDate(today.getDate() - 7);
+                    setCustomStartDate(weekAgo.toISOString().split('T')[0]);
+                    setCustomEndDate(today.toISOString().split('T')[0]);
+                  }
+                }}
+              >
+                <Calendar className="h-4 w-4 mr-1" />
+                Custom
+              </Button>
+              {showCustomPicker && range === "custom" && (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="text-sm border border-gray-300 rounded px-2 py-1"
+                    max={customEndDate || undefined}
+                  />
+                  <span className="text-gray-500">to</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="text-sm border border-gray-300 rounded px-2 py-1"
+                    min={customStartDate || undefined}
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm font-medium"
+                onClick={() => {
+                  const csvContent = generateCSV();
+                  downloadCSV(csvContent);
+                }}
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm font-medium"
+                onClick={() => generatePDF()}
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Export PDF
+              </Button>
             </div>
           </div>
 
@@ -721,159 +992,171 @@ export default function ReportsPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
             <ChartCard title="Disease Distribution">
-              {diseaseDistribution.length > 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35 }}
-                  className="rounded-2xl bg-gradient-to-br from-white via-emerald-50/60 to-white p-4"
-                >
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RechartsPieChart>
-                      <Pie
-                        data={diseaseDistribution}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => {
-                          const percentage = Math.round((percent ?? 0) * 100);
-                          return percentage > 0 ? `${percentage}%` : "";
-                        }}
-                        outerRadius={110}
-                        innerRadius={55}
-                        dataKey="value"
-                        paddingAngle={3}
-                        stroke="#f5f7f5"
-                        strokeWidth={2}
-                      >
-                        {diseaseDistribution.map((entry, index) => (
-                          <Cell
-                            key={`disease-${index}`}
-                            fill={COLORS[index % COLORS.length]}
-                            stroke={COLORS[index % COLORS.length]}
-                            strokeOpacity={0.15}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        cursor={{ stroke: "rgba(56,142,60,0.15)", strokeWidth: 2 }}
-                        contentStyle={{
-                          backgroundColor: "#ffffff",
-                          border: "1px solid rgba(56,142,60,0.12)",
-                          borderRadius: "12px",
-                          boxShadow: "0 12px 30px rgba(56,142,60,0.12)",
-                          fontSize: "12px",
-                          padding: "10px 14px",
-                        }}
-                        formatter={(value: number, name: string) => [
-                          `${value.toLocaleString("en-US")} cases`,
-                          name,
-                        ]}
-                      />
-                    </RechartsPieChart>
-                  </ResponsiveContainer>
-                  <div className="mt-5 grid grid-cols-1 gap-2 text-sm text-gray-700 md:grid-cols-2">
-                    {diseaseDistribution.map((entry, index) => (
+              <div className="rounded-2xl bg-gradient-to-br from-white via-emerald-50/60 to-white p-4">
+                {diseaseDistribution.length > 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                  >
+                    <ResponsiveContainer width="100%" height={300}>
+                      <RechartsPieChart>
+                        <Pie
+                          data={diseaseDistribution}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => {
+                            const percentage = Math.round((percent ?? 0) * 100);
+                            return percentage > 0 ? `${percentage}%` : "";
+                          }}
+                          outerRadius={110}
+                          innerRadius={55}
+                          dataKey="value"
+                          paddingAngle={3}
+                          stroke="#f5f7f5"
+                          strokeWidth={2}
+                        >
+                          {diseaseDistribution.map((entry) => (
+                            <Cell
+                              key={`disease-${entry.name}`}
+                              fill={DISEASE_COLORS[entry.name] || COLORS[0]}
+                              stroke={DISEASE_COLORS[entry.name] || COLORS[0]}
+                              strokeOpacity={0.15}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          cursor={{ stroke: "rgba(56,142,60,0.15)", strokeWidth: 2 }}
+                          contentStyle={{
+                            backgroundColor: "#ffffff",
+                            border: "1px solid rgba(56,142,60,0.12)",
+                            borderRadius: "12px",
+                            boxShadow: "0 12px 30px rgba(56,142,60,0.12)",
+                            fontSize: "12px",
+                            padding: "10px 14px",
+                          }}
+                          formatter={(value: number, name: string) => [
+                            `${value.toLocaleString("en-US")} cases`,
+                            name,
+                          ]}
+                        />
+                      </RechartsPieChart>
+                    </ResponsiveContainer>
+                  </motion.div>
+                ) : (
+                  <div className="flex h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-emerald-200/70 bg-white/80 px-6 text-center text-sm text-emerald-700">
+                    <p className="font-medium">No disease distribution data for {RANGE_LABELS[range].toLowerCase()} yet.</p>
+                    <p className="mt-1 text-xs text-emerald-600">New scans will populate this chart automatically.</p>
+                  </div>
+                )}
+                {/* Legend - Always visible with all disease types */}
+                <div className="mt-5 grid grid-cols-1 gap-2 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-3">
+                  {["Cercospora", "Yellow Mosaic Virus", "Healthy", "Unknown", "Downy Mildew", "Fusarium Wilt"].map((diseaseName) => {
+                    const entry = diseaseDistribution.find((e) => e.name === diseaseName);
+                    const value = entry?.value || 0;
+                    return (
                       <div
-                        key={entry.name}
-                        className="flex items-center gap-2 rounded-xl border border-gray-100 bg-white/70 px-3 py-2 shadow-sm"
+                        key={diseaseName}
+                        className="flex items-center gap-2.5 rounded-xl border border-gray-100 bg-white/70 px-3 py-2.5 shadow-sm transition-shadow hover:shadow-md"
                       >
                         <span
-                          className="inline-flex h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                          className="inline-flex h-3 w-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: DISEASE_COLORS[diseaseName] || "#6B7280" }}
                         />
-                        <span className="font-medium text-gray-900">{entry.name}</span>
-                        <span className="ml-auto text-xs font-semibold text-emerald-600">
-                          {entry.value.toLocaleString("en-US")}
+                        <span className="font-medium text-gray-900 flex-1">{diseaseName}</span>
+                        <span className="text-xs font-semibold text-emerald-600">
+                          {value.toLocaleString("en-US")}
                         </span>
                       </div>
-                    ))}
-                  </div>
-                </motion.div>
-              ) : (
-                <div className="flex h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-emerald-200/70 bg-white/80 px-6 text-center text-sm text-emerald-700">
-                  <p className="font-medium">No disease distribution data for {RANGE_LABELS[range].toLowerCase()} yet.</p>
-                  <p className="mt-1 text-xs text-emerald-600">New scans will populate this chart automatically.</p>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
             </ChartCard>
 
             <ChartCard title="Ripeness Distribution">
-              {ripenessDistribution.length > 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35, delay: 0.05 }}
-                  className="rounded-2xl bg-gradient-to-br from-white via-emerald-50/40 to-white p-4"
-                >
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RechartsPieChart>
-                      <Pie
-                        data={ripenessDistribution}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => {
-                          const percentage = Math.round((percent ?? 0) * 100);
-                          return percentage > 0 ? `${percentage}%` : "";
-                        }}
-                        outerRadius={110}
-                        innerRadius={55}
-                        dataKey="value"
-                        paddingAngle={3}
-                        stroke="#f5f7f5"
-                        strokeWidth={2}
-                      >
-                        {ripenessDistribution.map((entry, index) => (
-                          <Cell
-                            key={`ripeness-${index}`}
-                            fill={COLORS[index % COLORS.length]}
-                            stroke={COLORS[index % COLORS.length]}
-                            strokeOpacity={0.15}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        cursor={{ stroke: "rgba(56,142,60,0.15)", strokeWidth: 2 }}
-                        contentStyle={{
-                          backgroundColor: "#ffffff",
-                          border: "1px solid rgba(56,142,60,0.12)",
-                          borderRadius: "12px",
-                          boxShadow: "0 12px 30px rgba(56,142,60,0.12)",
-                          fontSize: "12px",
-                          padding: "10px 14px",
-                        }}
-                        formatter={(value: number, name: string) => [
-                          `${value.toLocaleString("en-US")} items`,
-                          name,
-                        ]}
-                      />
-                    </RechartsPieChart>
-                  </ResponsiveContainer>
-                  <div className="mt-5 grid grid-cols-1 gap-2 text-sm text-gray-700 md:grid-cols-2">
-                    {ripenessDistribution.map((entry, index) => (
+              <div className="rounded-2xl bg-gradient-to-br from-white via-emerald-50/40 to-white p-4">
+                {ripenessDistribution.length > 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: 0.05 }}
+                  >
+                    <ResponsiveContainer width="100%" height={300}>
+                      <RechartsPieChart>
+                        <Pie
+                          data={ripenessDistribution}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => {
+                            const percentage = Math.round((percent ?? 0) * 100);
+                            return percentage > 0 ? `${percentage}%` : "";
+                          }}
+                          outerRadius={110}
+                          innerRadius={55}
+                          dataKey="value"
+                          paddingAngle={3}
+                          stroke="#f5f7f5"
+                          strokeWidth={2}
+                        >
+                          {ripenessDistribution.map((entry) => (
+                            <Cell
+                              key={`ripeness-${entry.name}`}
+                              fill={RIPENESS_COLORS[entry.name] || COLORS[0]}
+                              stroke={RIPENESS_COLORS[entry.name] || COLORS[0]}
+                              strokeOpacity={0.15}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          cursor={{ stroke: "rgba(56,142,60,0.15)", strokeWidth: 2 }}
+                          contentStyle={{
+                            backgroundColor: "#ffffff",
+                            border: "1px solid rgba(56,142,60,0.12)",
+                            borderRadius: "12px",
+                            boxShadow: "0 12px 30px rgba(56,142,60,0.12)",
+                            fontSize: "12px",
+                            padding: "10px 14px",
+                          }}
+                          formatter={(value: number, name: string) => [
+                            `${value.toLocaleString("en-US")} items`,
+                            name,
+                          ]}
+                        />
+                      </RechartsPieChart>
+                    </ResponsiveContainer>
+                  </motion.div>
+                ) : (
+                  <div className="flex h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-emerald-200/70 bg-white/80 px-6 text-center text-sm text-emerald-700">
+                    <p className="font-medium">No ripeness distribution data for {RANGE_LABELS[range].toLowerCase()} yet.</p>
+                    <p className="mt-1 text-xs text-emerald-600">Collect more fruit maturity scans to see insights.</p>
+                  </div>
+                )}
+                {/* Legend - Always visible with all ripeness stages */}
+                <div className="mt-5 grid grid-cols-1 gap-2 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-3">
+                  {["Immature", "Mature", "Overmature", "Overripe", "Unknown"].map((ripenessName) => {
+                    const entry = ripenessDistribution.find((e) => e.name === ripenessName);
+                    const value = entry?.value || 0;
+                    return (
                       <div
-                        key={entry.name}
-                        className="flex items-center gap-2 rounded-xl border border-gray-100 bg-white/70 px-3 py-2 shadow-sm"
+                        key={ripenessName}
+                        className="flex items-center gap-2.5 rounded-xl border border-gray-100 bg-white/70 px-3 py-2.5 shadow-sm transition-shadow hover:shadow-md"
                       >
                         <span
-                          className="inline-flex h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                          className="inline-flex h-3 w-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: RIPENESS_COLORS[ripenessName] || "#6B7280" }}
                         />
-                        <span className="font-medium text-gray-900">{entry.name}</span>
-                        <span className="ml-auto text-xs font-semibold text-emerald-600">
-                          {entry.value.toLocaleString("en-US")}
+                        <span className="font-medium text-gray-900 flex-1">{ripenessName}</span>
+                        <span className="text-xs font-semibold text-emerald-600">
+                          {value.toLocaleString("en-US")}
                         </span>
                       </div>
-                    ))}
-                  </div>
-                </motion.div>
-              ) : (
-                <div className="flex h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-emerald-200/70 bg-white/80 px-6 text-center text-sm text-emerald-700">
-                  <p className="font-medium">No ripeness distribution data for {RANGE_LABELS[range].toLowerCase()} yet.</p>
-                  <p className="mt-1 text-xs text-emerald-600">Collect more fruit maturity scans to see insights.</p>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
             </ChartCard>
           </div>
         </div>

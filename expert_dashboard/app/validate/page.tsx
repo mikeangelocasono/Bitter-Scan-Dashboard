@@ -5,22 +5,38 @@ import AuthGuard from "@/components/AuthGuard";
 import { useMemo, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Table, Thead, Tbody, Tr, Th, Td } from "@/components/ui/table";
 import toast from "react-hot-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { supabase } from "@/components/supabase";
-import { Loader2, AlertCircle, X } from "lucide-react";
+import { Loader2, AlertCircle, X, Eye } from "lucide-react";
 import { Scan, SupabaseApiError, isSupabaseApiError } from "@/types";
 import { useUser } from "@/components/UserContext";
 import { useData } from "@/components/DataContext";
 
-const VALIDATION_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-	year: "numeric",
-	month: "2-digit",
-	day: "2-digit",
-	hour: "2-digit",
-	minute: "2-digit",
-	timeZone: "UTC",
-});
+// Accurate date formatter - shows local time without timezone shifts
+const formatScanDate = (dateString: string): string => {
+	try {
+		const date = new Date(dateString);
+		if (isNaN(date.getTime())) return 'Invalid Date';
+		
+		const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+		const month = monthNames[date.getMonth()];
+		const day = date.getDate();
+		const year = date.getFullYear();
+		
+		let hours = date.getHours();
+		const minutes = date.getMinutes();
+		const ampm = hours >= 12 ? 'PM' : 'AM';
+		hours = hours % 12;
+		hours = hours ? hours : 12; // 0 should be 12
+		const minutesStr = minutes < 10 ? `0${minutes}` : minutes;
+		
+		return `${month} ${day}, ${year} - ${hours}:${minutesStr} ${ampm}`;
+	} catch {
+		return 'Invalid Date';
+	}
+};
 
 const buildSupabaseErrorMessage = (error: SupabaseApiError | null): string => {
 	if (!error) return "Unknown error";
@@ -32,7 +48,9 @@ export default function ValidatePage() {
 	const [tab, setTab] = useState<'leaf' | 'fruit'>('leaf');
 	const [notes, setNotes] = useState<Record<string, string>>({});
 	const [decision, setDecision] = useState<Record<string, string>>({});
-	const [dateFilter, setDateFilter] = useState<string>("");
+	const [dateRangeType, setDateRangeType] = useState<'daily' | 'weekly' | 'monthly' | 'custom' | 'none'>('none');
+	const [startDate, setStartDate] = useState<string>("");
+	const [endDate, setEndDate] = useState<string>("");
 	const [detailId, setDetailId] = useState<string | null>(null);
 	const [processingScanId, setProcessingScanId] = useState<number | null>(null);
 	const { user } = useUser();
@@ -176,21 +194,69 @@ export default function ValidatePage() {
 	const onConfirm = useCallback((scanId: number) => handleValidation(scanId, "confirm"), [handleValidation]);
 	const onReject = useCallback((scanId: number) => handleValidation(scanId, "correct"), [handleValidation]);
 
+	// Helper function to get date range based on type
+	const getDateRange = useCallback((type: typeof dateRangeType) => {
+		if (type === 'none') return { start: null, end: null };
+		
+		const now = new Date();
+		now.setHours(23, 59, 59, 999);
+		
+		if (type === 'daily') {
+			const start = new Date(now);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		if (type === 'weekly') {
+			const start = new Date(now);
+			const dayOfWeek = start.getDay();
+			start.setDate(start.getDate() - dayOfWeek);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		if (type === 'monthly') {
+			const start = new Date(now.getFullYear(), now.getMonth(), 1);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		// Custom range
+		if (startDate && endDate) {
+			const start = new Date(startDate);
+			start.setHours(0, 0, 0, 0);
+			const end = new Date(endDate);
+			end.setHours(23, 59, 59, 999);
+			return { start, end };
+		}
+		
+		return { start: null, end: null };
+	}, [startDate, endDate]);
+
 	const filtered = useMemo(() => {
 		const pendingScans = scans.filter(scan => scan.status === 'Pending Validation');
+		
 		return pendingScans.filter((scan) => {
 			const matchesTab = tab === 'leaf' ? scan.scan_type === 'leaf_disease' : scan.scan_type === 'fruit_maturity';
-			if (!dateFilter) {
-				return matchesTab;
+			
+			// Apply date range filter
+			if (dateRangeType !== 'none') {
+				const { start, end } = getDateRange(dateRangeType);
+				if (start && end) {
+					const scanDate = new Date(scan.created_at);
+					if (scanDate < start || scanDate > end) {
+						return false;
+					}
+				}
 			}
-			const scanDate = new Date(scan.created_at).toISOString().split('T')[0];
-			return matchesTab && scanDate === dateFilter;
+			
+			return matchesTab;
 		});
-	}, [scans, dateFilter, tab]);
+	}, [scans, dateRangeType, tab, getDateRange]);
 
-	// Memoized helper functions
+	// Memoized date formatter - uses accurate local time
 	const formatDate = useCallback((dateString: string) => {
-		return VALIDATION_DATE_FORMATTER.format(new Date(dateString));
+		return formatScanDate(dateString);
 	}, []);
 
 	// Parse scan result details from scan data
@@ -252,23 +318,103 @@ export default function ValidatePage() {
 						</div>
 					</div>
 
-					{/* Date Filter */}
-					<div className="flex items-center gap-3">
-						<label htmlFor="date-filter" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+					{/* Date Range Filter */}
+					<div className="flex flex-wrap items-center gap-3">
+						<label className="text-sm font-medium text-gray-700 whitespace-nowrap">
 							Filter by Date:
 						</label>
-						<input 
-							id="date-filter"
-							type="date" 
-							value={dateFilter}
-							onChange={(e) => setDateFilter(e.target.value)}
-							className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-						/>
-						{dateFilter && (
+						<div className="inline-flex rounded-lg border border-gray-200 overflow-hidden bg-white shadow-sm">
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'daily' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('daily');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Daily
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'weekly' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('weekly');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Weekly
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'monthly' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('monthly');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Monthly
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'custom' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('custom');
+									if (!startDate || !endDate) {
+										const today = new Date().toISOString().split('T')[0];
+										const weekAgo = new Date();
+										weekAgo.setDate(weekAgo.getDate() - 7);
+										setStartDate(weekAgo.toISOString().split('T')[0]);
+										setEndDate(today);
+									}
+								}}
+							>
+								Custom
+							</button>
+						</div>
+						{dateRangeType === 'custom' && (
+							<div className="flex items-center gap-2">
+								<input 
+									type="date" 
+									value={startDate}
+									onChange={(e) => setStartDate(e.target.value)}
+									max={endDate || undefined}
+									className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+								/>
+								<span className="text-sm text-gray-600">to</span>
+								<input 
+									type="date" 
+									value={endDate}
+									onChange={(e) => setEndDate(e.target.value)}
+									min={startDate || undefined}
+									max={new Date().toISOString().split('T')[0]}
+									className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+								/>
+							</div>
+						)}
+						{dateRangeType !== 'none' && (
 							<Button 
 								variant="ghost" 
 								size="sm"
-								onClick={() => setDateFilter("")}
+								onClick={() => {
+									setDateRangeType('none');
+									setStartDate("");
+									setEndDate("");
+								}}
 								className="text-gray-600 hover:text-gray-900"
 							>
 								Clear
@@ -306,262 +452,216 @@ export default function ValidatePage() {
 							</div>
 						</div>
 					) : (
-						<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-							{filtered.map((scan) => (
-								<Card key={scan.id} className="flex flex-col shadow-sm hover:shadow-md transition-shadow">
-									<CardHeader className="pb-3 border-b">
-										<div className="flex items-center gap-3">
-											{scan.farmer_profile?.profile_picture ? (
-												<img 
-													src={scan.farmer_profile.profile_picture} 
-													alt="Profile" 
-													className="w-10 h-10 rounded-full object-cover"
-													onError={(e) => {
-														e.currentTarget.style.display = 'none';
-													}}
-												/>
-											) : (
-												<div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-600">
-													{scan.farmer_profile?.full_name?.charAt(0) || scan.farmer_profile?.username?.charAt(0) || '?'}
-												</div>
-											)}
-											<div className="flex-1 min-w-0">
-												<CardTitle className="text-lg font-semibold truncate">
-													{scan.farmer_profile?.full_name || scan.farmer_profile?.username || 'Unknown Farmer'}
-												</CardTitle>
-												<p className="text-xs text-gray-500 mt-0.5">{formatDate(scan.created_at)}</p>
-											</div>
-										</div>
-									</CardHeader>
-									<CardContent className="flex-1 flex flex-col space-y-4 pt-4">
-										{/* Scan Image */}
-										<div className="aspect-video w-full bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
-											{scan.image_url ? (
-												<img 
-													src={scan.image_url} 
-													alt="Scan preview" 
-													className="w-full h-full object-contain"
-													onError={(e) => {
-														e.currentTarget.style.display = 'none';
-													}}
-												/>
-											) : (
-												<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-													No image available
-												</div>
-											)}
-										</div>
-
-										{/* Scan Result Details */}
-										<div className="space-y-3 bg-white border border-gray-200 rounded-lg p-4">
-											{/* Disease */}
-											<div className="space-y-1">
-												<p className="text-xs font-semibold text-black uppercase tracking-wide">Disease</p>
-												<p className="text-sm text-black font-normal">{scan.ai_prediction}</p>
-											</div>
-											
-											{/* Confidence Level */}
-											<div className="space-y-1">
-												<p className="text-xs font-semibold text-black uppercase tracking-wide">Confidence Level</p>
-												<p className="text-sm text-black font-normal">
-													{scan.confidence !== null && scan.confidence !== undefined
-														? `Confidence: ${typeof scan.confidence === 'number' ? scan.confidence : String(scan.confidence)}%`
-														: 'Confidence: N/A'}
-												</p>
-											</div>
-
-											{/* Treatment / Solution */}
-											{scan.solution && (
-												<div className="space-y-1">
-													<p className="text-xs font-semibold text-black uppercase tracking-wide">Treatment / Solution</p>
-													<p className="text-sm text-black font-normal leading-relaxed line-clamp-3">{scan.solution}</p>
-												</div>
-											)}
-
-											{/* Recommended Products */}
-											{scan.recommended_products && (
-												<div className="space-y-1">
-													<p className="text-xs font-semibold text-black uppercase tracking-wide">Recommended Products</p>
-													<p className="text-sm text-black font-normal">{scan.recommended_products}</p>
-												</div>
-											)}
-										</div>
-
-										{/* Disease/Maturity Selection */}
-										<div className="space-y-2">
-											<label className="block text-sm font-semibold text-black uppercase tracking-wide">
-												{tab === 'leaf' ? 'Select Diagnosis' : 'Select Ripeness Stage'}
-											</label>
-											{tab === 'leaf' ? (
-												<select 
-													value={decision[scan.id.toString()] ?? ''} 
-													onChange={(e) => setDecision({...decision, [scan.id.toString()]: e.target.value})} 
-													className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 bg-white"
-												>
-													<option value="">Select diagnosis</option>
-													<option>Healthy</option>
-													<option>Fusarium Wilt</option>
-													<option>Downy Mildew</option>
-													<option>Yellow Mosaic Virus</option>
-													<option>Other</option>
-												</select>
-											) : (
-												<select 
-													value={decision[scan.id.toString()] ?? ''} 
-													onChange={(e) => setDecision({...decision, [scan.id.toString()]: e.target.value})} 
-													className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 bg-white"
-												>
-													<option value="">Select ripeness stage</option>
-													<option>Immature</option>
-													<option>Mature</option>
-													<option>Overmature</option>
-													<option>Overripe</option>
-												</select>
-											)}
-										</div>
-
-										{/* Notes */}
-										<div className="space-y-2">
-											<label className="block text-sm font-semibold text-black uppercase tracking-wide">Notes (optional)</label>
-											<textarea 
-												value={notes[scan.id.toString()] ?? ''} 
-												onChange={(e) => setNotes({...notes, [scan.id.toString()]: e.target.value})} 
-												placeholder="Add your expert analysis or comments..." 
-												className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 resize-none"
-												rows={3}
-											/>
-										</div>
-
-										{/* Action Buttons */}
-										<div className="flex gap-3 pt-2">
-											<Button 
-												onClick={() => onConfirm(scan.id)}
-												disabled={hasDecision(scan.id) || processingScanId === scan.id}
-												className="flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-											>
-												{processingScanId === scan.id ? 'Processing...' : 'Confirm'}
-											</Button>
-											<Button 
-												variant="outline" 
-												onClick={() => onReject(scan.id)}
-												disabled={!hasDecision(scan.id) || processingScanId === scan.id}
-												className="flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-											>
-												{processingScanId === scan.id ? 'Processing...' : 'Correct'}
-											</Button>
-										</div>
-									</CardContent>
-								</Card>
-							))}
+						<div className="overflow-x-auto">
+							<Table>
+								<Thead>
+									<Tr>
+										<Th className="w-20">Image</Th>
+										<Th>Farmer Name</Th>
+										<Th>Crop Type</Th>
+										<Th>Status</Th>
+										<Th>Date Scanned</Th>
+										<Th className="text-right">Action</Th>
+									</Tr>
+								</Thead>
+								<Tbody>
+									{filtered.map((scan) => {
+										const cropType = scan.scan_type === 'leaf_disease' ? 'Leaf Disease' : 'Fruit Maturity';
+										const farmerName = scan.farmer_profile?.full_name || scan.farmer_profile?.username || 'Unknown Farmer';
+										
+										return (
+											<Tr key={scan.id}>
+												<Td>
+													<div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex-shrink-0">
+														{scan.image_url ? (
+															<img 
+																src={scan.image_url} 
+																alt="Scan preview" 
+																className="w-full h-full object-cover"
+																onError={(e) => {
+																	e.currentTarget.style.display = 'none';
+																}}
+															/>
+														) : (
+															<div className="flex items-center justify-center h-full text-gray-400 text-xs">
+																No image
+															</div>
+														)}
+													</div>
+												</Td>
+												<Td>
+													<div className="flex items-center gap-2">
+														{scan.farmer_profile?.profile_picture ? (
+															<img 
+																src={scan.farmer_profile.profile_picture} 
+																alt="Profile" 
+																className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+																onError={(e) => {
+																	e.currentTarget.style.display = 'none';
+																}}
+															/>
+														) : (
+															<div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600 flex-shrink-0">
+																{farmerName.charAt(0).toUpperCase()}
+															</div>
+														)}
+														<span className="font-medium text-gray-900 truncate">{farmerName}</span>
+													</div>
+												</Td>
+												<Td>
+													<span className="text-sm text-gray-700">{cropType}</span>
+												</Td>
+												<Td>
+													<span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+														{scan.status}
+													</span>
+												</Td>
+												<Td>
+													<span className="text-sm text-gray-600">{formatDate(scan.created_at)}</span>
+												</Td>
+												<Td className="text-right">
+													<Button
+														variant="outline"
+														size="sm"
+														onClick={() => setDetailId(scan.id.toString())}
+														className="flex items-center gap-1.5 bg-white text-black border-black/20 shadow-sm hover:bg-white hover:text-black hover:font-semibold hover:shadow-md hover:border-black/30 transition-all"
+													>
+														<Eye className="h-4 w-4" />
+														View Details
+													</Button>
+												</Td>
+											</Tr>
+										);
+									})}
+								</Tbody>
+							</Table>
 						</div>
 					)}
 
 					<Dialog open={!!detailId} onOpenChange={() => setDetailId(null)}>
-						<DialogContent className="sm:max-w-2xl p-0 overflow-hidden bg-white">
-							<div className="flex flex-col max-h-[85vh]">
-								<div className="flex items-start justify-between px-6 py-5 border-b border-gray-200">
-									<DialogHeader className="p-0">
-										<DialogTitle className="text-lg font-semibold text-black">Validate Scan</DialogTitle>
-									</DialogHeader>
-									<button 
-										aria-label="Close" 
-										onClick={() => setDetailId(null)} 
-										className="rounded-md p-1.5 text-black hover:bg-gray-100 transition-colors"
-									>
-										<X className="h-5 w-5" />
-									</button>
-								</div>
-								<div className="px-6 py-6 overflow-y-auto bg-white">
-									{detailId && (() => {
-										const selectedScan = scans.find(scan => scan.id.toString() === detailId);
-										if (!selectedScan) return <p className="text-sm text-black">Scan not found.</p>;
-										
-										const scanDetails = parseScanDetails(selectedScan);
-										
-										return (
-											<div className="space-y-6">
-												{/* Scan Result Details - Clean Professional Layout */}
-												<div className="space-y-6 bg-white">
-													{/* Disease Section */}
-													<div className="space-y-2">
-														<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Disease</h3>
-														<p className="text-base text-black font-normal leading-relaxed">{scanDetails.disease}</p>
-													</div>
+						<DialogContent className="p-0 overflow-hidden bg-white max-h-[90vh] flex flex-col">
+							{detailId && (() => {
+								const selectedScan = scans.find(scan => scan.id.toString() === detailId);
+								if (!selectedScan) return (
+									<div className="p-6">
+										<p className="text-sm text-black">Scan not found.</p>
+									</div>
+								);
+								
+								const scanDetails = parseScanDetails(selectedScan);
+								const cropType = selectedScan.scan_type === 'leaf_disease' ? 'Leaf Disease' : 'Fruit Maturity';
+								
+								return (
+									<>
+										{/* Modal Header */}
+										<div className="flex items-start justify-between px-6 py-5 border-b border-black/20 bg-white rounded-t-xl">
+											<DialogHeader className="p-0">
+												<DialogTitle className="text-lg font-semibold text-gray-900">Validate Scan</DialogTitle>
+											</DialogHeader>
+											<button 
+												aria-label="Close" 
+												onClick={() => setDetailId(null)} 
+												className="rounded-md p-1.5 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+											>
+												<X className="h-5 w-5" />
+											</button>
+										</div>
 
-													{/* Confidence Level Section */}
-													<div className="space-y-2">
-														<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Confidence Level</h3>
-														<p className="text-base text-black font-normal">{scanDetails.confidence}</p>
-													</div>
-
-													{/* Treatment / Solution Section */}
-													{scanDetails.solution && (
-														<div className="space-y-2">
-															<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Treatment / Solution</h3>
-															<p className="text-base text-black font-normal leading-relaxed whitespace-pre-wrap">{scanDetails.solution}</p>
-														</div>
-													)}
-
-													{/* Recommended Products Section */}
-													{scanDetails.recommendedProducts && (
-														<div className="space-y-2">
-															<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Recommended Products</h3>
-															<p className="text-base text-black font-normal leading-relaxed">{scanDetails.recommendedProducts}</p>
-														</div>
-													)}
-												</div>
-
-												{/* Divider */}
-												<div className="border-t border-gray-200"></div>
-
-												{/* Scan Image */}
-												{selectedScan.image_url && (
-													<div className="space-y-2">
-														<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Scan Image</h3>
-														<div className="mt-2">
-															<img 
-																src={selectedScan.image_url} 
-																alt="Scan preview" 
-																className="w-full max-h-80 md:max-h-96 object-contain rounded border border-gray-200"
-																onError={(e) => { e.currentTarget.style.display = 'none'; }}
-															/>
-														</div>
-													</div>
-												)}
-
-												{/* Divider */}
-												<div className="border-t border-gray-200"></div>
-
-												{/* Farmer Information */}
-												<div className="space-y-3">
-													<h3 className="text-sm font-semibold text-black uppercase tracking-wide">Farmer Information</h3>
+										{/* Scrollable Content - Matching Card Design */}
+										<div className="px-6 py-6 overflow-y-auto bg-white flex-1">
+											<Card className="shadow-sm border border-black/20">
+												<CardHeader className="pb-3 border-b border-black/10">
 													<div className="flex items-center gap-3">
 														{selectedScan.farmer_profile?.profile_picture ? (
 															<img 
 																src={selectedScan.farmer_profile.profile_picture} 
 																alt="Profile" 
 																className="w-10 h-10 rounded-full object-cover"
-																onError={(e) => { e.currentTarget.style.display = 'none'; }}
+																onError={(e) => {
+																	e.currentTarget.style.display = 'none';
+																}}
 															/>
 														) : (
-															<div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-black">
+															<div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-600">
 																{selectedScan.farmer_profile?.full_name?.charAt(0) || selectedScan.farmer_profile?.username?.charAt(0) || '?'}
 															</div>
 														)}
-														<div>
-															<p className="text-base text-black font-normal">
+														<div className="flex-1 min-w-0">
+															<CardTitle className="text-lg font-semibold truncate">
 																{selectedScan.farmer_profile?.full_name || selectedScan.farmer_profile?.username || 'Unknown Farmer'}
-															</p>
-															<p className="text-sm text-black font-normal opacity-70">{formatDate(selectedScan.created_at)}</p>
+															</CardTitle>
+															<p className="text-xs text-gray-500 mt-0.5">{formatDate(selectedScan.created_at)}</p>
 														</div>
 													</div>
-												</div>
+												</CardHeader>
+												<CardContent className="flex-1 flex flex-col space-y-4 pt-4">
+													{/* Scan Image */}
+													<div className="aspect-video w-full bg-emerald-50 rounded-lg overflow-hidden border border-black/20">
+														{selectedScan.image_url ? (
+															<img 
+																src={selectedScan.image_url} 
+																alt="Scan preview" 
+																className="w-full h-full object-contain"
+																onError={(e) => {
+																	e.currentTarget.style.display = 'none';
+																}}
+															/>
+														) : (
+															<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+																No image available
+															</div>
+														)}
+													</div>
 
-												{/* Divider */}
-												<div className="border-t border-gray-200"></div>
+													{/* Scan Result Details */}
+													<div className="space-y-3 bg-white border border-black/20 rounded-lg p-4">
+														{/* Crop Type */}
+														<div className="space-y-1">
+															<p className="text-xs font-semibold text-black uppercase tracking-wide">Crop Type</p>
+															<p className="text-sm text-black font-normal">{cropType}</p>
+														</div>
 
-												{/* Expert Validation Section */}
-												<div className="space-y-4">
+														{/* Disease / AI Result */}
+														<div className="space-y-1">
+															<p className="text-xs font-semibold text-black uppercase tracking-wide">
+																{selectedScan.scan_type === 'leaf_disease' ? 'Disease' : 'Maturity Stage'}
+															</p>
+															<p className="text-sm text-black font-normal">{scanDetails.disease}</p>
+														</div>
+														
+														{/* Confidence Level */}
+														<div className="space-y-1">
+															<p className="text-xs font-semibold text-black uppercase tracking-wide">Confidence Level</p>
+															<p className="text-sm text-black font-normal">{scanDetails.confidence}</p>
+														</div>
+
+														{/* Validation Status */}
+														<div className="space-y-1">
+															<p className="text-xs font-semibold text-black uppercase tracking-wide">Validation Status</p>
+															<p className="text-sm text-black font-normal">
+																<span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+																	{selectedScan.status}
+																</span>
+															</p>
+														</div>
+
+														{/* Treatment / Solution */}
+														{scanDetails.solution && (
+															<div className="space-y-1">
+																<p className="text-xs font-semibold text-black uppercase tracking-wide">Treatment / Solution</p>
+																<p className="text-sm text-black font-normal leading-relaxed">{scanDetails.solution}</p>
+															</div>
+														)}
+
+														{/* Recommended Products */}
+														{scanDetails.recommendedProducts && (
+															<div className="space-y-1">
+																<p className="text-xs font-semibold text-black uppercase tracking-wide">Recommended Products</p>
+																<p className="text-sm text-black font-normal">{scanDetails.recommendedProducts}</p>
+															</div>
+														)}
+													</div>
+
 													{/* Disease/Maturity Selection */}
 													<div className="space-y-2">
 														<label className="block text-sm font-semibold text-black uppercase tracking-wide">
@@ -571,7 +671,7 @@ export default function ValidatePage() {
 															<select 
 																value={decision[detailId!] ?? ''} 
 																onChange={(e) => setDecision({...decision, [detailId!]: e.target.value})} 
-																className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 bg-white"
+																className="w-full rounded-lg border border-emerald-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
 															>
 																<option value="">Select diagnosis</option>
 																<option>Healthy</option>
@@ -584,7 +684,7 @@ export default function ValidatePage() {
 															<select 
 																value={decision[detailId!] ?? ''} 
 																onChange={(e) => setDecision({...decision, [detailId!]: e.target.value})} 
-																className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 bg-white"
+																className="w-full rounded-lg border border-emerald-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
 															>
 																<option value="">Select ripeness stage</option>
 																<option>Immature</option>
@@ -595,38 +695,34 @@ export default function ValidatePage() {
 														)}
 													</div>
 
-													{/* Expert Notes */}
+													{/* Notes */}
 													<div className="space-y-2">
-														<label className="block text-sm font-semibold text-black uppercase tracking-wide">Notes (optional)</label>
+														<label className="block text-sm font-semibold text-gray-900 uppercase tracking-wide">Notes (optional)</label>
 														<textarea 
 															value={notes[detailId!] ?? ''} 
 															onChange={(e) => setNotes({...notes, [detailId!]: e.target.value})} 
 															placeholder="Add your expert analysis or comments..." 
-															className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 resize-none" 
-															rows={3} 
+															className="w-full rounded-lg border border-emerald-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+															rows={3}
 														/>
 													</div>
+												</CardContent>
+											</Card>
+										</div>
 
-													<p className="text-sm text-black font-normal">Please choose Confirm if the AI is correct, or Correct to provide the right answer.</p>
-												</div>
-											</div>
-										);
-									})()}
-								</div>
-								<div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 bg-white">
-									<Button 
-										variant="outline" 
-										onClick={() => setDetailId(null)}
-										className="text-black border-gray-300 hover:bg-gray-50"
-									>
-										Close
-									</Button>
-									{detailId && (
-										<>
+										{/* Modal Footer */}
+										<DialogFooter className="bg-white border-t border-black/20 rounded-b-xl">
+											<Button 
+												variant="outline" 
+												onClick={() => setDetailId(null)}
+												className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700"
+											>
+												Cancel
+											</Button>
 											<Button 
 												onClick={() => onConfirm(parseInt(detailId))}
 												disabled={hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
-												className="bg-black text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+												className="bg-[var(--primary)] text-white hover:bg-[var(--primary-600)] disabled:opacity-50 disabled:cursor-not-allowed"
 											>
 												{processingScanId === parseInt(detailId) ? 'Processing...' : 'Confirm'}
 											</Button>
@@ -634,14 +730,14 @@ export default function ValidatePage() {
 												variant="outline" 
 												onClick={() => onReject(parseInt(detailId))}
 												disabled={!hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
-												className="text-black border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+												className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
 											>
 												{processingScanId === parseInt(detailId) ? 'Processing...' : 'Correct'}
 											</Button>
-										</>
-									)}
-								</div>
-							</div>
+										</DialogFooter>
+									</>
+								);
+							})()}
 						</DialogContent>
 					</Dialog>
 				</div>

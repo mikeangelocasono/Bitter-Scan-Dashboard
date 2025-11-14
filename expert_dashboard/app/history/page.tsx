@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td } from "@/components/ui/table";
 import Badge from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import toast from "react-hot-toast";
 import { supabase } from "@/components/supabase";
@@ -14,17 +14,35 @@ import { Loader2, AlertCircle, Edit, Trash2, X } from "lucide-react";
 import { useUser } from "@/components/UserContext";
 import { useData } from "@/components/DataContext";
 
-const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-	year: "numeric",
-	month: "2-digit",
-	day: "2-digit",
-	hour: "2-digit",
-	minute: "2-digit",
-	timeZone: "UTC",
-});
+// Accurate date formatter - shows local time without timezone shifts
+const formatHistoryDate = (dateString: string): string => {
+	try {
+		const date = new Date(dateString);
+		if (isNaN(date.getTime())) return 'Invalid Date';
+		
+		const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+		const month = monthNames[date.getMonth()];
+		const day = date.getDate();
+		const year = date.getFullYear();
+		
+		let hours = date.getHours();
+		const minutes = date.getMinutes();
+		const ampm = hours >= 12 ? 'PM' : 'AM';
+		hours = hours % 12;
+		hours = hours ? hours : 12; // 0 should be 12
+		const minutesStr = minutes < 10 ? `0${minutes}` : minutes;
+		
+		return `${month} ${day}, ${year} - ${hours}:${minutesStr} ${ampm}`;
+	} catch {
+		return 'Invalid Date';
+	}
+};
 
 export default function HistoryPage() {
-	const [dateFilter, setDateFilter] = useState<string>("");
+	const [dateRangeType, setDateRangeType] = useState<'daily' | 'weekly' | 'monthly' | 'custom' | 'none'>('none');
+	const [startDate, setStartDate] = useState<string>("");
+	const [endDate, setEndDate] = useState<string>("");
+	const [showAll, setShowAll] = useState(false);
 	const [detailIdx, setDetailIdx] = useState<number | null>(null);
 	const [editIdx, setEditIdx] = useState<number | null>(null);
 	const [deleteIdx, setDeleteIdx] = useState<number | null>(null);
@@ -33,25 +51,88 @@ export default function HistoryPage() {
 	const { user } = useUser();
 	const { scans, validationHistory, loading, error, refreshData } = useData();
 
-	// Filter validation history based on date
+	// Helper function to get date range based on type
+	const getDateRange = useCallback((type: typeof dateRangeType) => {
+		if (type === 'none') return { start: null, end: null };
+		
+		const now = new Date();
+		now.setHours(23, 59, 59, 999);
+		
+		if (type === 'daily') {
+			const start = new Date(now);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		if (type === 'weekly') {
+			const start = new Date(now);
+			const dayOfWeek = start.getDay();
+			start.setDate(start.getDate() - dayOfWeek);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		if (type === 'monthly') {
+			const start = new Date(now.getFullYear(), now.getMonth(), 1);
+			start.setHours(0, 0, 0, 0);
+			return { start, end: now };
+		}
+		
+		// Custom range
+		if (startDate && endDate) {
+			const start = new Date(startDate);
+			start.setHours(0, 0, 0, 0);
+			const end = new Date(endDate);
+			end.setHours(23, 59, 59, 999);
+			return { start, end };
+		}
+		
+		return { start: null, end: null };
+	}, [startDate, endDate]);
+
+	// Filter validation history based on date range
 	const filtered = useMemo(() => {
-		if (!dateFilter) {
+		if (dateRangeType === 'none') {
 			return validationHistory;
 		}
+		
+		const { start, end } = getDateRange(dateRangeType);
+		if (!start || !end) {
+			return validationHistory;
+		}
+		
 		return validationHistory.filter(record => {
-			const recordDate = new Date(record.validated_at).toISOString().split('T')[0];
-			return recordDate === dateFilter;
+			const recordDate = new Date(record.validated_at);
+			return recordDate >= start && recordDate <= end;
 		});
-	}, [validationHistory, dateFilter]);
+	}, [validationHistory, dateRangeType, getDateRange]);
 
 	// Memoized helper functions to prevent recreation on every render
 	const formatScanType = useCallback((type: string) => {
 		return type === 'leaf_disease' ? 'Leaf Disease' : 'Fruit Maturity';
 	}, []);
 
+	// Memoized date formatter - uses accurate local time
 	const formatDate = useCallback((dateString: string) => {
-		return HISTORY_DATE_FORMATTER.format(new Date(dateString));
+		return formatHistoryDate(dateString);
 	}, []);
+
+	// Reset showAll when filter changes
+	useEffect(() => {
+		setShowAll(false);
+	}, [dateRangeType, startDate, endDate]);
+
+	// Paginated records - show 5 by default, all when "See More" is clicked
+	const displayedRecords = useMemo(() => {
+		if (showAll) {
+			return filtered;
+		}
+		return filtered.slice(0, 5);
+	}, [filtered, showAll]);
+
+	const hasMoreRecords = useMemo(() => {
+		return filtered.length > 5;
+	}, [filtered]);
 
 	// CSV escaping function to handle commas, quotes, and newlines
 	const escapeCSV = useCallback((value: string | number | null | undefined): string => {
@@ -220,7 +301,14 @@ export default function HistoryPage() {
 						<h1 className="text-2xl font-bold mb-2">Validation History Report</h1>
 						<p className="text-sm text-gray-600 mb-4">
 							Generated on {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-							{dateFilter && ` • Filtered by date: ${dateFilter}`}
+							{dateRangeType !== 'none' && (
+								<span>
+									{dateRangeType === 'custom' && startDate && endDate
+										? ` • Filtered: ${startDate} to ${endDate}`
+										: ` • Filtered: ${dateRangeType.charAt(0).toUpperCase() + dateRangeType.slice(1)}`
+									}
+								</span>
+							)}
 						</p>
 					</div>
 
@@ -260,23 +348,103 @@ export default function HistoryPage() {
 						</Card>
 					</div>
 
-					{/* Date Filter */}
-					<div className="flex items-center gap-3 no-print">
-						<label htmlFor="date-filter" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+					{/* Date Range Filter */}
+					<div className="flex flex-wrap items-center gap-3 no-print">
+						<label className="text-sm font-medium text-gray-700 whitespace-nowrap">
 							Filter by Date:
 						</label>
-						<input 
-							id="date-filter"
-							type="date" 
-							value={dateFilter}
-							onChange={(e) => setDateFilter(e.target.value)}
-							className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-						/>
-						{dateFilter && (
+						<div className="inline-flex rounded-lg border border-gray-200 overflow-hidden bg-white shadow-sm">
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'daily' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('daily');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Daily
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'weekly' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('weekly');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Weekly
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'monthly' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('monthly');
+									setStartDate("");
+									setEndDate("");
+								}}
+							>
+								Monthly
+							</button>
+							<button 
+								className={`px-4 py-2 text-xs font-medium transition-all ${
+									dateRangeType === 'custom' 
+										? 'bg-[var(--primary)] text-white' 
+										: 'text-gray-700 hover:bg-gray-50'
+								}`}
+								onClick={() => {
+									setDateRangeType('custom');
+									if (!startDate || !endDate) {
+										const today = new Date().toISOString().split('T')[0];
+										const weekAgo = new Date();
+										weekAgo.setDate(weekAgo.getDate() - 7);
+										setStartDate(weekAgo.toISOString().split('T')[0]);
+										setEndDate(today);
+									}
+								}}
+							>
+								Custom
+							</button>
+						</div>
+						{dateRangeType === 'custom' && (
+							<div className="flex items-center gap-2">
+								<input 
+									type="date" 
+									value={startDate}
+									onChange={(e) => setStartDate(e.target.value)}
+									max={endDate || undefined}
+									className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+								/>
+								<span className="text-sm text-gray-600">to</span>
+								<input 
+									type="date" 
+									value={endDate}
+									onChange={(e) => setEndDate(e.target.value)}
+									min={startDate || undefined}
+									max={new Date().toISOString().split('T')[0]}
+									className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+								/>
+							</div>
+						)}
+						{dateRangeType !== 'none' && (
 							<Button 
 								variant="ghost" 
 								size="sm"
-								onClick={() => setDateFilter("")}
+								onClick={() => {
+									setDateRangeType('none');
+									setStartDate("");
+									setEndDate("");
+								}}
 								className="text-gray-600 hover:text-gray-900"
 							>
 								Clear
@@ -305,7 +473,7 @@ export default function HistoryPage() {
 												'Validated At'
 											];
 
-											// Build CSV rows with proper escaping
+											// Build CSV rows with proper escaping (use all filtered records, not just displayed)
 											const rows = filtered.map(record => {
 												const farmerName = record.scan?.farmer_profile?.full_name || record.scan?.farmer_profile?.username || 'Unknown';
 												const farmerEmail = record.scan?.farmer_profile?.email || record.scan?.farmer_id || 'N/A';
@@ -397,26 +565,34 @@ export default function HistoryPage() {
 									</div>
 								</div>
 							) : (
-								<div className="overflow-x-auto print-table-wrapper">
-									<Table className="w-full print-table">
-										<Thead>
-											<Tr>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Farmer</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Expert</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Scan Type</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">AI Prediction</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Expert Validation</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Status</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Validated At</Th>
-												<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700 no-print">Actions</Th>
-											</Tr>
-										</Thead>
-										<Tbody>
-											{filtered.map((record, idx) => (
+								<>
+									<div className="overflow-x-auto print-table-wrapper">
+										<Table className="w-full print-table">
+											<Thead>
+												<Tr>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Farmer</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Expert</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Scan Type</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">AI Prediction</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Expert Validation</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Status</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700">Validated At</Th>
+													<Th className="text-left py-3 px-4 font-semibold text-sm text-gray-700 no-print">Actions</Th>
+												</Tr>
+											</Thead>
+											<Tbody>
+												{displayedRecords.map((record, idx) => {
+													// Find the original index in filtered array for edit/delete operations
+													const originalIdx = filtered.findIndex(r => r.id === record.id);
+													return (
 												<Tr 
 													key={record.id}
 													className="hover:bg-gray-50 cursor-pointer transition-colors"
-													onClick={() => setDetailIdx(idx)}
+													onClick={() => {
+														if (originalIdx >= 0) {
+															setDetailIdx(originalIdx);
+														}
+													}}
 												>
 													<Td className="whitespace-nowrap py-4 px-4">
 														<div className="flex items-center gap-2">
@@ -456,7 +632,12 @@ export default function HistoryPage() {
 															<Button 
 																variant="outline" 
 																size="sm" 
-																onClick={() => setDetailIdx(idx)}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	if (originalIdx >= 0) {
+																		setDetailIdx(originalIdx);
+																	}
+																}}
 																className="text-xs"
 															>
 																View Details
@@ -466,7 +647,12 @@ export default function HistoryPage() {
 																	<Button 
 																		variant="outline" 
 																		size="sm" 
-																		onClick={() => openEditDialog(idx)}
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			if (originalIdx >= 0) {
+																				openEditDialog(originalIdx);
+																			}
+																		}}
 																		className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200"
 																		title="Edit"
 																	>
@@ -475,7 +661,12 @@ export default function HistoryPage() {
 																	<Button 
 																		variant="outline" 
 																		size="sm" 
-																		onClick={() => setDeleteIdx(idx)}
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			if (originalIdx >= 0) {
+																				setDeleteIdx(originalIdx);
+																			}
+																		}}
 																		className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
 																		title="Delete"
 																	>
@@ -486,10 +677,39 @@ export default function HistoryPage() {
 														</div>
 													</Td>
 												</Tr>
-											))}
-										</Tbody>
-									</Table>
-								</div>
+													);
+												})}
+											</Tbody>
+										</Table>
+									</div>
+									{/* See More Button */}
+									{hasMoreRecords && !showAll && (
+										<div className="flex justify-center mt-4 no-print">
+											<Button
+												variant="outline"
+												onClick={() => setShowAll(true)}
+												className="text-black border-gray-300 bg-white shadow-sm"
+											>
+												See More ({filtered.length - 5} more records)
+											</Button>
+										</div>
+									)}
+									{showAll && hasMoreRecords && (
+										<div className="flex justify-center mt-4 no-print">
+											<Button
+												variant="outline"
+												onClick={() => {
+													setShowAll(false);
+													// Scroll to top of table smoothly
+													window.scrollTo({ top: 0, behavior: 'smooth' });
+												}}
+												className="text-black border-gray-300 bg-white shadow-sm"
+											>
+												Show Less
+											</Button>
+										</div>
+									)}
+								</>
 							)}
 						</CardContent>
 					</Card>

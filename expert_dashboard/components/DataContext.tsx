@@ -26,6 +26,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
 	const [error, setError] = useState<string | null>(null);
 	const initialFetched = useRef(false);
 	const isFetchingRef = useRef(false);
+	const fetchDataRef = useRef<typeof fetchData | null>(null);
+	const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+	const subscriptionActiveRef = useRef(false);
 
 	const isReady = useMemo(() => Boolean(user?.id), [user?.id]);
 
@@ -155,6 +158,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
 		[isReady]
 	);
 
+	// Keep ref updated with latest fetchData function
+	useEffect(() => {
+		fetchDataRef.current = fetchData;
+	}, [fetchData]);
+
 	// Helper function to fetch a single scan with its profile
 	const fetchScanWithProfile = useCallback(async (scanId: number): Promise<Scan | null> => {
 		try {
@@ -223,9 +231,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	useEffect(() => {
-		if (!isReady) return;
+		if (!isReady) {
+			// Clean up subscription when user becomes unavailable
+			if (channelRef.current) {
+				supabase.removeChannel(channelRef.current);
+				channelRef.current = null;
+				subscriptionActiveRef.current = false;
+			}
+			if (initialFetched.current) {
+				initialFetched.current = false;
+			}
+			return;
+		}
 
-		let channel: ReturnType<typeof supabase.channel> | null = null;
+		// Prevent multiple subscriptions
+		if (subscriptionActiveRef.current) return;
 
 		// Wait for auth/user to be ready before first fetch to avoid empty flashes
 		if (!initialFetched.current) {
@@ -233,11 +253,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
 		}
 
 		// Set up real-time subscriptions with direct state updates
-		// Use a unique channel name to avoid conflicts (use user ID only, not Date.now() to avoid hydration issues)
+		// Use a unique channel name to avoid conflicts
 		const channelName = `global-data-changes-${user?.id || 'anonymous'}`;
 		
 		try {
-			channel = supabase.channel(channelName, {
+			// Clean up any existing channel first
+			if (channelRef.current) {
+				supabase.removeChannel(channelRef.current);
+			}
+
+			const channel = supabase.channel(channelName, {
 				config: {
 					broadcast: { self: false },
 				},
@@ -257,10 +282,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
 					if (fullScan) {
 						setScans((prev) => {
 							// Check if scan already exists (prevent duplicates)
-							if (prev.some((s) => s.id === fullScan.id)) {
-								return prev;
+							const exists = prev.some((s) => s.id === fullScan.id);
+							if (exists) {
+								return prev; // Return same reference to prevent re-render
 							}
-							// Add new scan at the beginning and maintain order
+							// Add new scan at the beginning (already sorted by created_at desc from DB)
 							return [fullScan, ...prev];
 						});
 					}
@@ -281,10 +307,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
 						setScans((prev) => {
 							const index = prev.findIndex((s) => s.id === fullScan.id);
 							if (index === -1) {
-								// Scan doesn't exist, add it
+								// Scan doesn't exist, add it at the beginning (already sorted from DB)
 								return [fullScan, ...prev];
 							}
-							// Update existing scan
+							// Update existing scan in place (maintains order, no need to re-sort)
 							const updated = [...prev];
 							updated[index] = fullScan;
 							return updated;
@@ -419,50 +445,87 @@ export function DataProvider({ children }: { children: ReactNode }) {
 			)
 			.subscribe((status, err) => {
 				if (status === "SUBSCRIBED") {
-					// Successfully subscribed
+					channelRef.current = channel;
+					subscriptionActiveRef.current = true;
+					if (process.env.NODE_ENV === "development") {
+						console.log("✅ Real-time subscription active for scans and validations");
+					}
 				} else if (status === "CHANNEL_ERROR") {
-					const errorMessage = err?.message || "Unknown error";
-					console.error("Error subscribing to real-time data changes:", errorMessage);
+					// Improved error handling - extract error message from various possible formats
+					let errorMessage = "Unknown error";
 					if (err) {
-						console.error("Full error:", err);
+						if (typeof err === "string") {
+							errorMessage = err;
+						} else if (err instanceof Error) {
+							errorMessage = err.message || errorMessage;
+						} else if (typeof err === "object" && err !== null) {
+							// Try to extract message from error object
+							const errObj = err as Record<string, unknown>;
+							errorMessage = 
+								(typeof errObj.message === "string" ? errObj.message : null) ||
+								(typeof errObj.error === "string" ? errObj.error : null) ||
+								(typeof errObj.toString === "function" ? errObj.toString() : null) ||
+								JSON.stringify(errObj) ||
+								errorMessage;
+						}
 					}
+					
+					// Only log errors in development or if they're meaningful
+					if (process.env.NODE_ENV === "development") {
+						console.error("Error subscribing to real-time data changes:", errorMessage);
+						if (err && typeof err === "object") {
+							console.error("Full error object:", err);
+						}
+					}
+					
 					// Check if error is related to Realtime not being enabled
-					if (errorMessage.includes("realtime") || errorMessage.includes("publication") || errorMessage.includes("not enabled")) {
-						console.warn("⚠️ Realtime may not be enabled on your tables. Please run realtime_setup.sql in your Supabase SQL Editor.");
+					const errorStr = String(errorMessage).toLowerCase();
+					if (errorStr.includes("realtime") || errorStr.includes("publication") || errorStr.includes("not enabled") || errorStr.includes("permission")) {
+						if (process.env.NODE_ENV === "development") {
+							console.warn("⚠️ Realtime may not be enabled on your tables. Please enable Realtime on the 'scans' and 'validation_history' tables in your Supabase dashboard.");
+						}
 					}
+					
+					subscriptionActiveRef.current = false;
 					// Fallback to periodic refresh if real-time fails
-					if (initialFetched.current) {
-						fetchData();
+					if (initialFetched.current && fetchDataRef.current) {
+						fetchDataRef.current();
 					}
 				} else if (status === "TIMED_OUT" || status === "CLOSED") {
-					console.warn("Real-time connection lost, attempting to refresh data");
+					if (process.env.NODE_ENV === "development") {
+						console.warn("Real-time connection lost, attempting to refresh data");
+					}
+					subscriptionActiveRef.current = false;
 					// Refresh data when connection is lost
-					if (initialFetched.current) {
-						fetchData();
+					if (initialFetched.current && fetchDataRef.current) {
+						fetchDataRef.current();
 					}
 				}
 			});
 		} catch (error: unknown) {
 			console.error("Error setting up real-time subscription:", error);
+			subscriptionActiveRef.current = false;
 			// Fallback to periodic refresh
-			if (initialFetched.current) {
-				fetchData();
+			if (initialFetched.current && fetchDataRef.current) {
+				fetchDataRef.current();
 			}
 		}
 
 		return () => {
-			if (channel) {
-				supabase.removeChannel(channel);
+			if (channelRef.current) {
+				supabase.removeChannel(channelRef.current);
+				channelRef.current = null;
+				subscriptionActiveRef.current = false;
 			}
 		};
-	}, [isReady, fetchData, fetchScanWithProfile, fetchValidationWithRelations, user?.id]);
+	}, [isReady, user?.id]); // Removed fetchData, fetchScanWithProfile, fetchValidationWithRelations from deps to prevent re-subscriptions
 
 	useEffect(() => {
 		if (typeof document === "undefined") return;
 
 		const handleVisibilityChange = () => {
-			if (document.visibilityState === "visible") {
-				void fetchData();
+			if (document.visibilityState === "visible" && fetchDataRef.current) {
+				void fetchDataRef.current();
 			}
 		};
 
@@ -470,7 +533,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 		return () => {
 			document.removeEventListener("visibilitychange", handleVisibilityChange);
 		};
-	}, [fetchData]);
+	}, []); // Empty deps - use ref to access latest fetchData
 
 	const removeScanFromState = useCallback((scanId: number) => {
 		setScans((prev) => prev.filter((scan) => scan.id !== scanId));

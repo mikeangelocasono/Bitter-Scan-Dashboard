@@ -14,6 +14,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const initialResolved = useRef(false);
   const isMountedRef = useRef(true);
+  const resolveSessionRef = useRef<typeof resolveSession | null>(null);
 
   const fetchProfile = useCallback(async (userId: string) => {
     try {
@@ -63,6 +64,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
     },
     [fetchProfile]
   );
+
+  // Keep ref updated with latest resolveSession function
+  useEffect(() => {
+    resolveSessionRef.current = resolveSession;
+  }, [resolveSession]);
 
   const logout = useCallback(async () => {
     // Immediately clear local state for instant UI response
@@ -213,7 +219,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (typeof document === 'undefined') return;
 
     const handleVisibilityChange = async () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || !resolveSessionRef.current) return;
       try {
         const {
           data: { session },
@@ -237,7 +243,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           throw sessionError;
         }
         
-        await resolveSession(session?.user ?? null);
+        await resolveSessionRef.current(session?.user ?? null);
       } catch (error: unknown) {
         // Handle AuthApiError for refresh token issues
         if (isSupabaseApiError(error)) {
@@ -264,7 +270,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [resolveSession]);
+  }, []); // Empty deps - use ref to access latest resolveSession
 
   return (
     <UserContext.Provider value={{ user, profile, loading, refreshProfile, logout }}>

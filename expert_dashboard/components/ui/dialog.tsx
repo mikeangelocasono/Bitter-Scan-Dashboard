@@ -20,7 +20,7 @@ export function Dialog({ open, onOpenChange, children }: { open: boolean; onOpen
 		>
 			<div className="absolute inset-0 bg-black/40 transition-opacity duration-200" onClick={() => onOpenChange(false)} />
 			<div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-				<div className="w-full max-w-lg bg-[var(--surface)] rounded-xl shadow-lg border border-[var(--color-border)] transform transition-all duration-200 ease-out scale-95 opacity-0 data-[open]:scale-100 data-[open]:opacity-100" data-open={open ? "true" : undefined}>
+				<div className="w-full max-w-lg sm:max-w-2xl bg-[var(--surface)] rounded-xl shadow-lg border border-[var(--color-border)] transform transition-all duration-200 ease-out scale-95 opacity-0 data-[open]:scale-100 data-[open]:opacity-100" data-open={open ? "true" : undefined}>
 					{children}
 				</div>
 			</div>
