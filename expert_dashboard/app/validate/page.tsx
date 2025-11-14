@@ -539,7 +539,8 @@ export default function ValidatePage() {
 					)}
 
 					<Dialog open={!!detailId} onOpenChange={() => setDetailId(null)}>
-						<DialogContent className="p-0 overflow-hidden bg-white max-h-[90vh] flex flex-col">
+						<div className="p-0 overflow-hidden bg-white max-h-[90vh] flex flex-col">
+							<DialogContent>
 							{detailId && (() => {
 								const selectedScan = scans.find(scan => scan.id.toString() === detailId);
 								if (!selectedScan) return (
@@ -555,9 +556,13 @@ export default function ValidatePage() {
 									<>
 										{/* Modal Header */}
 										<div className="flex items-start justify-between px-6 py-5 border-b border-black/20 bg-white rounded-t-xl">
-											<DialogHeader className="p-0">
-												<DialogTitle className="text-lg font-semibold text-gray-900">Validate Scan</DialogTitle>
-											</DialogHeader>
+											<div className="p-0">
+												<DialogHeader>
+													<div className="text-lg font-semibold text-gray-900">
+														<DialogTitle>Validate Scan</DialogTitle>
+													</div>
+												</DialogHeader>
+											</div>
 											<button 
 												aria-label="Close" 
 												onClick={() => setDetailId(null)} 
@@ -711,34 +716,37 @@ export default function ValidatePage() {
 										</div>
 
 										{/* Modal Footer */}
-										<DialogFooter className="bg-white border-t border-black/20 rounded-b-xl">
-											<Button 
-												variant="outline" 
-												onClick={() => setDetailId(null)}
-												className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700"
-											>
-												Cancel
-											</Button>
-											<Button 
-												onClick={() => onConfirm(parseInt(detailId))}
-												disabled={hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
-												className="bg-[var(--primary)] text-white hover:bg-[var(--primary-600)] disabled:opacity-50 disabled:cursor-not-allowed"
-											>
-												{processingScanId === parseInt(detailId) ? 'Processing...' : 'Confirm'}
-											</Button>
-											<Button 
-												variant="outline" 
-												onClick={() => onReject(parseInt(detailId))}
-												disabled={!hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
-												className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-											>
-												{processingScanId === parseInt(detailId) ? 'Processing...' : 'Correct'}
-											</Button>
-										</DialogFooter>
+										<div className="bg-white border-t border-black/20 rounded-b-xl">
+											<DialogFooter>
+												<Button 
+													variant="outline" 
+													onClick={() => setDetailId(null)}
+													className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700"
+												>
+													Cancel
+												</Button>
+												<Button 
+													onClick={() => onConfirm(parseInt(detailId))}
+													disabled={hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
+													className="bg-[var(--primary)] text-white hover:bg-[var(--primary-600)] disabled:opacity-50 disabled:cursor-not-allowed"
+												>
+													{processingScanId === parseInt(detailId) ? 'Processing...' : 'Confirm'}
+												</Button>
+												<Button 
+													variant="outline" 
+													onClick={() => onReject(parseInt(detailId))}
+													disabled={!hasDecision(parseInt(detailId)) || processingScanId === parseInt(detailId)}
+													className="text-gray-700 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+												>
+													{processingScanId === parseInt(detailId) ? 'Processing...' : 'Correct'}
+												</Button>
+											</DialogFooter>
+										</div>
 									</>
 								);
 							})()}
-						</DialogContent>
+							</DialogContent>
+						</div>
 					</Dialog>
 				</div>
 			</AppShell>
